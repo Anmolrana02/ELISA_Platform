@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Environment files — NEVER commit these
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env.local
+
+# Secrets
+gee_key.json
+*.key
+*.pem
+
+# VS Code
+.vscode/settings.json
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Data and models (large files)
+elisa2/data/
+elisa2/saved_models/
+elisa2/logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+.env
+.env.local
+gee_key.json
+venv/
+node_modules/
+elisa2/data/
+elisa2/saved_models/
+elisa2/logs/

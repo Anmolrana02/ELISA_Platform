@@ -1,0 +1,60 @@
+# agronomy.yaml
+# config/agronomy.yaml
+# ─────────────────────────────────────────────────────────────────────
+# All agronomy constants for ELISA 2.0.
+# Edit here — never hardcode in Python files.
+# ─────────────────────────────────────────────────────────────────────
+
+study_area:
+  districts:
+    Baghpat:      { lat: 28.94, lon: 77.22 }
+    Shamli:       { lat: 29.45, lon: 77.31 }
+    Meerut:       { lat: 28.98, lon: 77.70 }
+    Muzaffarnagar: { lat: 29.47, lon: 77.68 }
+    Ghaziabad:    { lat: 28.66, lon: 77.42 }
+
+soil:
+  field_capacity_frac: 0.25      # volumetric fraction at FC
+  wilting_point_frac:  0.15      # volumetric fraction at PWP
+
+crops:
+  Wheat:
+    root_depth_mm:    900.0
+    mad:              0.50        # Management Allowed Depletion
+    irr_amount_mm:    70.0
+    growing_months:   [10, 11, 12, 1, 2, 3, 4]
+    kc:                           # FAO-56 Kc by DOY range
+      initial:  { doy_start: 305, doy_end: 335, value: 0.30 }
+      mid:      { doy_start: 335, doy_end: 90,  value: 1.15 }
+      late:     { doy_start: 90,  doy_end: 105, value: 0.40 }
+      default:  0.80
+
+  Rice:
+    root_depth_mm:    300.0
+    ponding_target_mm:  50.0
+    ponding_trigger_mm: 20.0
+    percolation_mm_day: 5.0
+    growing_months:   [6, 7, 8, 9, 10, 11]
+    kc:
+      initial:  { doy_start: 171, doy_end: 200, value: 1.05 }
+      mid:      { doy_start: 200, doy_end: 280, value: 1.20 }
+      late:     { doy_start: 280, doy_end: 304, value: 0.90 }
+      default:  0.60
+
+pump:
+  power_hp:     5
+  efficiency:   0.65             # centrifugal pump η
+  run_duration_h: 2.0            # standard single-event pump run
+
+tariff:                          # UPPCL IEX Day-Ahead Market ₹/kWh
+  low:    3.50                   # 00:00–06:00
+  medium: 6.00                   # 06:00–18:00 and 22:00–24:00
+  peak:   9.50                   # 18:00–22:00
+
+mpc:
+  lookahead_hours: 48
+  rain_suppression_threshold_mm: 5.0
+
+simulation:
+  blind_interval_days:  10       # Farmer 1: fixed irrigation cadence
+  blind_amount_mm:      80.0     # Farmer 1: amount per event
