@@ -1,1 +1,28 @@
 # Paste contents from the generated requirements.txt here
+# backend/requirements.txt
+
+# ── Web framework ─────────────────────────────────────────────────────────────
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+python-multipart==0.0.12     # form data parsing (OTP endpoint)
+
+# ── Database ──────────────────────────────────────────────────────────────────
+sqlalchemy==2.0.36
+geoalchemy2==0.15.2          # PostGIS geometry columns
+alembic==1.13.3
+asyncpg==0.30.0              # async PostgreSQL driver
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# ── Scheduler ─────────────────────────────────────────────────────────────────
+apscheduler==3.10.4
+
+# ── HTTP ──────────────────────────────────────────────────────────────────────
+httpx==0.27.2
+requests==2.32.3
+
+# ── Config ────────────────────────────────────────────────────────────────────
+pydantic-settings==2.6.1
+python-dotenv==1.0.1
