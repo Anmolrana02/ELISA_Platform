@@ -1,7 +1,7 @@
 import os
 
 # Root directory
-root = "F:\ELISA\ELISA_2.1"
+root = "F:/ELISA/ELISA_Platform/elisa2"
 
 # Folder + file structure
 structure = {

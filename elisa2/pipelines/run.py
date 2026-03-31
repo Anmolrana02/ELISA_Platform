@@ -33,7 +33,7 @@ import sys
 import time
 from pathlib import Path
 
-from narwhals import read_csv
+from utils.dates import read_csv
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
