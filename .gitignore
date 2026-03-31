@@ -46,3 +46,33 @@ node_modules/
 elisa2/data/
 elisa2/saved_models/
 elisa2/logs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+backend/venv/
+elisa2/venv/
+
+# Environment files
+.env
+.env.local
+backend/.env
+frontend/.env.local
+
+# GEE private key
+gee_key.json
+
+# ML data and model files (large)
+elisa2/data/
+elisa2/saved_models/
+elisa2/logs/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Node
+frontend/node_modules/
+frontend/dist/
