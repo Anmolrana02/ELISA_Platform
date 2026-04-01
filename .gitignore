@@ -76,3 +76,7 @@ __pycache__/
 # Node
 frontend/node_modules/
 frontend/dist/
+
+
+.env
+backend/.env.example
