@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timezone
 from typing import Optional
+import pandas as pd
 
 _log = logging.getLogger(__name__)
 
@@ -113,10 +114,12 @@ def _get_blind_baseline(district: str, season: str) -> dict:
 
     # Filter to district + season window
     start, end = season_date_range(season)
+    # Ensure date column is datetime for reliable comparison
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
     mask = (
         (df["district"] == district)
-        & (df["date"] >= str(start))
-        & (df["date"] <= str(end))
+        & (df["date"] >= pd.Timestamp(start))
+        & (df["date"] <= pd.Timestamp(end))
     )
     season_df = df[mask].copy()
 

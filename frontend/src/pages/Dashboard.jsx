@@ -34,11 +34,16 @@ export default function Dashboard() {
   const { data: farmsData } = useQuery({
     queryKey: ['farms'],
     queryFn:  () => farmsApi.list().then(r => r.data),
-    onSuccess: (d) => {
-      setFarms(d.farms)
-      if (!farm && d.farms.length > 0) setActiveFarmId(d.farms[0].id)
-    },
   })
+
+  useEffect(() => {
+    if (farmsData?.farms) {
+      setFarms(farmsData.farms)
+      if (!farm && farmsData.farms.length > 0) {
+        setActiveFarmId(farmsData.farms[0].id)
+      }
+    }
+  }, [farmsData])
 
   // Today's prediction (from cache most of the time)
   const { data: predData, isLoading: predLoading } = useQuery({
@@ -118,7 +123,7 @@ export default function Dashboard() {
         />
         <MetricCard
           label="7-Day Forecast"
-          value={pred?.sm_forecast ? `${pred.sm_forecast[6]?.toFixed(0)}` : '—'}
+          value={pred?.sm_forecast?.[6]?.toFixed(0) ?? '—'}
           unit="mm Day 7"
           sublabel={pred?.irrigate ? '⚠ Irrigation required' : '✓ SM stays adequate'}
           variant={pred?.irrigate ? 'alert' : 'default'}
@@ -126,10 +131,16 @@ export default function Dashboard() {
         />
         <MetricCard
           label="Pump Window"
-          value={pred?.pump_start_hour !== null && pred?.pump_start_hour !== undefined
-            ? `${String(pred.pump_start_hour).padStart(2,'0')}:00`
-            : '—'}
-          unit={pred?.pump_end_hour !== null ? `– ${String(pred.pump_end_hour).padStart(2,'0')}:00` : ''}
+          value={
+            pred?.pump_start_hour != null
+              ? `${String(pred.pump_start_hour).padStart(2,'0')}:00`
+              : '—'
+          }
+          unit={
+            pred?.pump_end_hour != null
+              ? `– ${String(pred.pump_end_hour).padStart(2,'0')}:00`
+              : ''
+          }
           sublabel={pred?.cost_inr ? `₹${pred.cost_inr.toFixed(2)} estimated` : 'Cheapest tariff window'}
           variant="wheat"
           loading={predLoading}

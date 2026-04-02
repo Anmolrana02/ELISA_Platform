@@ -61,7 +61,8 @@ from decision.state_manager import (                                   # noqa: E
     log_irrigation,
     update_state,
 )
-from decision.tariff import calculator as tariff_calculator            # noqa: E402
+from decision.tariff import calculator as tariff_calculator 
+from utils.dates import read_csv            # noqa: E402
 
 _log = logging.getLogger(__name__)
 
@@ -100,17 +101,13 @@ def _run_prediction_sync(
 ) -> dict:
     """
     Synchronous prediction — runs PatchTST + MPC in a thread.
-
-    Called via asyncio.get_event_loop().run_in_executor() from the
-    async wrapper below so it never blocks the FastAPI event loop.
-
-    Returns a fully-serialisable dict (no dataclass objects).
     """
     _log.info(
         "Prediction requested: farm=%s district=%s crop=%s date=%s",
         farm_id, district, crop, on_date,
     )
 
+    # ── Run the full MPC decision ─────────────────────────────────────────
     decision: Optional[IrrigationDecision] = run_decision(
         district=district,
         farm_id=farm_id,
@@ -129,29 +126,74 @@ def _run_prediction_sync(
             "date": on_date.isoformat(),
         }
 
-    result = decision.to_dict()
-    result["farm_id"] = farm_id
-    result["date"]    = on_date.isoformat()
+    # ── Get the SM forecast separately ───────────────────────────────────
+    # IrrigationDecision does not store sm_forecast — we must call
+    # _get_forecast directly to get the 7-day array.
+    try:
+        from decision.mpc import _get_forecast
 
-    # Serialise PumpWindow fields (to_dict() already handles this, but be explicit)
+        # Get current SM the same way run_decision does
+        from decision.state_manager import get_state
+        state_data = get_state(farm_id)
+        if state_data and state_data.get("sm_mm"):
+            current_sm = float(state_data["sm_mm"])
+        else:
+            # Fall back to dataset
+            import pandas as pd
+            df = read_csv(elisa_settings.real_soil_dataset
+                         if elisa_settings.real_soil_dataset.exists()
+                         else elisa_settings.simulated_dataset)
+            recent = df[
+                (df["district"] == district) &
+                (df["date"] <= pd.Timestamp(on_date))
+            ].tail(1)
+            current_sm = float(recent["real_soil_moisture_mm"].iloc[0]) \
+                         if not recent.empty else 200.0
+
+        sm_forecast = _get_forecast(
+            district=district,
+            farm_id=farm_id,
+            on_date=on_date,
+            data_source="real",
+            current_sm=current_sm,
+        )
+    except Exception as exc:
+        _log.warning("Could not get sm_forecast separately: %s. Using ETo decay.", exc)
+        # Simple ETo decay fallback — 4mm/day depletion
+        try:
+            from decision.state_manager import get_state
+            state_data = get_state(farm_id)
+            current_sm = float(state_data["sm_mm"]) if state_data else 200.0
+        except Exception:
+            current_sm = 200.0
+        sm_forecast = [round(max(0.0, current_sm - 4.0 * (i + 1)), 2) for i in range(7)]
+
+    # ── Build result dict ─────────────────────────────────────────────────
+    result = {
+        "farm_id":    farm_id,
+        "date":       on_date.isoformat(),
+        "irrigate":   decision.irrigate,
+        "reason":     decision.reason,
+        "sm_forecast": sm_forecast,   # 7-element list, always populated
+        "pump_start_hour": None,
+        "pump_end_hour":   None,
+        "energy_kwh":      None,
+        "cost_inr":        None,
+        "tariff_slot":     None,
+    }
+
     if decision.window:
         result["pump_start_hour"] = decision.window.start_hour
         result["pump_end_hour"]   = decision.window.end_hour
         result["energy_kwh"]      = decision.window.energy_kwh
         result["cost_inr"]        = decision.window.cost_inr
         result["tariff_slot"]     = decision.window.tariff_slot
-    else:
-        result.setdefault("pump_start_hour", None)
-        result.setdefault("pump_end_hour",   None)
-        result.setdefault("energy_kwh",      None)
-        result.setdefault("cost_inr",        None)
-        result.setdefault("tariff_slot",     None)
 
     _log.info(
-        "Prediction done: farm=%s irrigate=%s window=%s",
+        "Prediction done: farm=%s irrigate=%s sm_forecast=%s",
         farm_id,
         result["irrigate"],
-        f"{result['pump_start_hour']:02d}:00" if result.get("pump_start_hour") is not None else "—",
+        [f"{v:.0f}" for v in sm_forecast],
     )
     return result
 
