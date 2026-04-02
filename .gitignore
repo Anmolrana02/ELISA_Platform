@@ -80,3 +80,8 @@ frontend/dist/
 
 .env
 backend/.env.example
+elisa2/venv/
+elisa2/.git/
+*.pth
+*.pt
+elisa2/gee_key.json
