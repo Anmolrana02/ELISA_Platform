@@ -39,39 +39,36 @@ export default function Login() {
   async function handleVerifyOtp(e) {
     e.preventDefault()
     setLoading(true); setError('')
+    
+    // If we are on the name step, include the name
+    const nameToSend = step === 'name' ? name : undefined
+    
     try {
-      const res = await authApi.verifyOtp(phone, otp, name || undefined, language)
+      const res = await authApi.verifyOtp(phone, otp, nameToSend || undefined, language)
       setToken(res.data.access_token)
       setUser(res.data.user)
-      navigate('/dashboard', { replace: true })
+      // New user goes to farm setup, returning user goes to dashboard
+      navigate(res.data.user ? '/dashboard' : '/farms/new', { replace: true })
     } catch (err) {
       const detail = err.response?.data?.detail || ''
       if (detail.includes('Name is required')) {
+        // OTP is still valid — just need the name
         setIsNew(true)
         setStep('name')
         setError('')
       } else {
-        setError(detail || 'Incorrect OTP. Please try again.')
+        setError(detail || 'Verification failed. Please try again.')
       }
     } finally {
       setLoading(false)
     }
   }
 
-  async function handleRegister(e) {
+async function handleRegister(e) {
     e.preventDefault()
     if (!name.trim()) { setError('Please enter your name.'); return }
-    setLoading(true); setError('')
-    try {
-      const res = await authApi.verifyOtp(phone, otp, name, language)
-      setToken(res.data.access_token)
-      setUser(res.data.user)
-      navigate('/farms/new', { replace: true })
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Registration failed.')
-    } finally {
-      setLoading(false)
-    }
+    // Call the same verify function — it now has the name
+    return handleVerifyOtp(e)
   }
 
   return (

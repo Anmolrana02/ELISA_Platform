@@ -57,7 +57,7 @@ router = APIRouter(tags=["irrigation"])
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class ConfirmIrrigationRequest(BaseModel):
-    date: date = Field(
+    irrigation_date: date = Field(
         default_factory=date.today,
         description="Date of irrigation event (defaults to today)",
         examples=["2025-02-14"],
@@ -75,7 +75,7 @@ class ConfirmIrrigationRequest(BaseModel):
         description="Optional farmer note (e.g. 'pump ran 2.5 hours')",
     )
 
-    @field_validator("date", mode="before")
+    @field_validator("irrigation_date", mode="before")
     @classmethod
     def parse_date(cls, v):
         if isinstance(v, str):
@@ -186,7 +186,7 @@ async def confirm_irrigation_route(
         state = confirm_irrigation(
             farm_id  = str(farm.id),
             district = farm.district or "Meerut",
-            on_date  = body.date,
+            on_date  = body.irrigation_date,
             mm       = body.mm,
         )
     except Exception as exc:
@@ -197,10 +197,10 @@ async def confirm_irrigation_route(
         )
 
     # ── 2. Mark today's prediction row as farmer-confirmed ────────────────────
-    prediction_marked = await _mark_prediction_confirmed(farm.id, body.date, db)
+    prediction_marked = await _mark_prediction_confirmed(farm.id, body.irrigation_date, db)
 
     # ── 3. Recompute savings (incremental — fast) ─────────────────────────────
-    season = current_season(body.date)
+    season = current_season(body.irrigation_date)
     try:
         savings = compute_savings(
             farm_id  = str(farm.id),
@@ -223,7 +223,7 @@ async def confirm_irrigation_route(
     return ConfirmIrrigationResponse(
         confirmed         = True,
         farm_id           = str(farm.id),
-        date              = body.date.isoformat(),
+        date              = body.irrigation_date.isoformat(),
         mm                = body.mm,
         # Updated SM
         sm_mm             = round(state["sm_mm"],           1),

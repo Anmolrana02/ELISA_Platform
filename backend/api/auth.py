@@ -124,17 +124,21 @@ async def verify_otp_route(
     body: VerifyOTPRequest,
     db:   AsyncSession = Depends(get_db),
 ) -> TokenResponse:
-    """
-    Verifies the submitted OTP.
 
-    On success:
-    - Upserts the user row (creates if first login, updates name if returning user).
-    - Returns a JWT valid for 30 days.
+    # ── Check if user exists BEFORE consuming the OTP ─────────────────────
+    # This prevents the OTP being consumed when we still need more info
+    result = await db.execute(select(User).where(User.phone == body.phone))
+    user   = result.scalar_one_or_none()
 
-    On failure:
-    - 401 for invalid / expired OTP.
-    - 429 for too many wrong attempts (OTP has been invalidated — resend required).
-    """
+    if user is None and not body.name:
+        # New user — return 422 WITHOUT consuming the OTP
+        # Frontend will show the name form and resubmit with name included
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Name is required for first-time registration.",
+        )
+
+    # ── NOW verify and consume the OTP ────────────────────────────────────
     ok, reason = verify_otp(body.phone, body.otp)
 
     if not ok:
@@ -153,17 +157,8 @@ async def verify_otp_route(
             detail=detail_map.get(reason, "OTP verification failed."),
         )
 
-    # Upsert user
-    result = await db.execute(select(User).where(User.phone == body.phone))
-    user   = result.scalar_one_or_none()
-
+    # ── Upsert user ───────────────────────────────────────────────────────
     if user is None:
-        # First login — require name
-        if not body.name:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Name is required for first-time registration.",
-            )
         user = User(
             name            = body.name,
             phone           = body.phone,
@@ -171,9 +166,8 @@ async def verify_otp_route(
             whatsapp_opt_in = True,
         )
         db.add(user)
-        await db.flush()   # get user.id before commit
+        await db.flush()
     else:
-        # Returning user — optionally update name
         if body.name and body.name != user.name:
             user.name = body.name
         if body.language:
