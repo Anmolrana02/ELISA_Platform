@@ -90,7 +90,8 @@ tenacity==9.1.4
 threadpoolctl==3.6.0
 toml==0.10.2
 toolz==1.1.0
-torch==2.10.0
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.1.2+cpu
 tornado==6.5.5
 typing-inspection==0.4.2
 typing_extensions==4.15.0
