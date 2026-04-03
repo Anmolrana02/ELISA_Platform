@@ -59,8 +59,12 @@ async def lifespan(app: FastAPI):
     _log.info("=" * 56)
 
     # Verify DB + PostGIS
-    await init_db()
-    _log.info("Database connection verified.")
+    # Verify DB + PostGIS
+    try:
+        await init_db()
+        _log.info("Database connection verified.")
+    except Exception as exc:
+        _log.warning("DB connection check failed (non-fatal): %s", exc)
 
     # Verify ML core health (non-blocking — logs warnings, doesn't abort startup)
     try:
