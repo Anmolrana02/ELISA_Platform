@@ -19,6 +19,9 @@ Run locally:
 Render:
     web: cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
 """
+import sys
+print("==> Python interpreter started", flush=True)
+
 
 from __future__ import annotations
 
