@@ -22,11 +22,6 @@ Render:
 
 from __future__ import annotations
 
-import sys
-print("==> Python interpreter started", flush=True)
-
-
-
 
 import logging
 from contextlib import asynccontextmanager
