@@ -38,6 +38,7 @@ engine = create_async_engine(
     max_overflow=10,
     echo=not settings.is_production,  # SQL logging in dev only
     future=True,
+    connect_args={"statement_cache_size": 0},
 )
 
 # ── Session factory ───────────────────────────────────────────────────────────
