@@ -178,7 +178,7 @@ async def confirm_irrigation_route(
 
     _log.info(
         "Irrigation confirmed: farm=%s district=%s date=%s mm=%.1f",
-        farm_id, farm.district, body.date, body.mm,
+        farm_id, farm.district, body.irrigation_date, body.mm,
     )
 
     # ── 1. Log event + run FAO-56 water balance correction ────────────────────
