@@ -53,6 +53,24 @@ async def lifespan(app: FastAPI):
     _log.info("  elisa2    : %s", settings.elisa2_root)
     _log.info("=" * 56)
 
+    # ── NEW: Download ML models and datasets from Google Drive ────────────────
+    # On Render the disk is ephemeral — files vanish on every deploy/restart.
+    # Drive is the persistent store. This runs before anything else.
+    try:
+        import sys
+        sys.path.insert(0, str(settings.elisa2_root))
+        from utils.drive_sync import ensure_files, download_farm_states
+        _log.info("Syncing files from Google Drive...")
+        ensure_files()          # downloads models + datasets if missing
+        download_farm_states()  # downloads per-farmer JSON state files
+        _log.info("Drive sync complete.")
+    except Exception as exc:
+        _log.warning(
+            "Drive sync skipped (non-fatal): %s  "
+            "— app will use ETo fallback if models are missing.", exc
+        )
+    # ─────────────────────────────────────────────────────────────────────────
+
     # Verify DB + PostGIS
     # Verify DB + PostGIS
     try:

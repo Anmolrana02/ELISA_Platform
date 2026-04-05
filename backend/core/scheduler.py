@@ -35,6 +35,12 @@ scheduler = AsyncIOScheduler(timezone="Asia/Kolkata")
 async def daily_prediction_job() -> None:
     """
     Main daily job. Called at 05:00 IST.
+    Order of operations:
+      1. Extend dataset with fresh NASA POWER weather   ← NEW
+      2. Run predictions for every active farm
+      3. Send WhatsApp alerts
+      4. Recompute savings
+      5. Upload farm states back to Drive               ← NEW
     Imports are deferred inside the function to avoid circular import
     at module load time (scheduler is imported by main.py during startup).
     """
@@ -59,7 +65,23 @@ async def daily_prediction_job() -> None:
     _log.info("Daily prediction job started for %s", today)
     _log.info("=" * 56)
 
-    # Load all active farms + their users in one query
+    # ── STEP 1: Extend dataset with recent NASA POWER weather ─────────────────
+    # This ensures PatchTST always has a real 30-day window, not stale 2024 data
+    try:
+        import sys
+        from core.config import get_settings as _get_cfg
+        _cfg = _get_cfg()
+        sys.path.insert(0, str(_cfg.elisa2_root))
+        from ingestion.live_weather import extend_dataset
+        import asyncio as _asyncio
+        loop = _asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: extend_dataset(days_back=45))
+        _log.info("Dataset extended with fresh NASA POWER data.")
+    except Exception as exc:
+        _log.warning("Dataset extension failed (non-fatal): %s", exc)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # Load all active farms + their users
     async with get_db_context() as db:
         result = await db.execute(
             select(Farm, User)
@@ -69,22 +91,28 @@ async def daily_prediction_job() -> None:
         pairs = result.all()
 
     _log.info("Processing %d active farms.", len(pairs))
-
-    success = error = skipped = 0
+    success = error = 0
 
     for farm, user in pairs:
-        farm_label = f"{farm.name} ({farm.district})"
         try:
             await _process_farm(farm, user, today)
             success += 1
         except Exception as exc:
-            _log.error("Farm %s (%s) failed: %s", farm_label, farm.id, exc)
+            _log.error("Farm %s (%s) failed: %s", farm.name, farm.id, exc)
             error += 1
 
-    _log.info(
-        "Daily job done. success=%d error=%d skipped=%d",
-        success, error, skipped,
-    )
+    _log.info("Predictions done. success=%d error=%d", success, error)
+
+    # ── STEP 5: Upload updated farm states back to Drive ──────────────────────
+    try:
+        from utils.drive_sync import upload_models_and_data
+        import asyncio as _asyncio
+        loop = _asyncio.get_event_loop()
+        await loop.run_in_executor(None, upload_models_and_data)
+        _log.info("Farm states synced to Drive.")
+    except Exception as exc:
+        _log.warning("Nightly Drive upload failed (non-fatal): %s", exc)
+    # ─────────────────────────────────────────────────────────────────────────
 
 
 async def _process_farm(farm, user, today: date) -> None:

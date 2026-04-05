@@ -26,3 +26,8 @@ requests==2.32.5
 # ── Config ────────────────────────────────────────────────────────────────────
 pydantic-settings==2.13.1
 python-dotenv==1.2.2
+
+google-api-python-client==2.193.0
+google-auth==2.49.1
+
+huggingface-hub==0.23.4

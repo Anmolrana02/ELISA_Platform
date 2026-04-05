@@ -103,3 +103,4 @@ xarray==2026.2.0
 xyzservices==2025.11.0
 zict==3.0.0
 zipp==3.23.0
+huggingface-hub==0.23.4
