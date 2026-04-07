@@ -152,8 +152,14 @@ def update_state(farm_id: str, district: str, on_date: date) -> dict:
                 (df["district"] == district) &
                 (df["date"] <= pd.Timestamp(on_date))
             ]
-            sm_yesterday = float(recent.iloc[-1][_TARGET]) if not recent.empty \
-                           else agro.crops["Wheat"].fc_mm
+            if not recent.empty:
+                crop_name = str(recent.iloc[-1].get("crop", "Wheat"))
+                profile   = agro.get_crop(crop_name)
+                raw_sm    = float(recent.iloc[-1][_TARGET])
+                # Clamp to physical range — dataset may contain uncapped values
+                sm_yesterday = float(max(profile.pwp_mm, min(raw_sm, profile.fc_mm)))
+            else:
+                sm_yesterday = agro.crops["Wheat"].fc_mm
         except Exception:
             sm_yesterday = agro.crops["Wheat"].fc_mm
 

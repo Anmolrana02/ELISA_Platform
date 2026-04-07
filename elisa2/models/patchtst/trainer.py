@@ -2,15 +2,13 @@
 """
 models/patchtst/trainer.py
 ───────────────────────────
-Training loop for the PatchTST soil moisture forecaster.
+Training loop for PatchTST v2.
 
-Features:
-    - AdamW optimiser + cosine annealing LR schedule
-    - Gradient clipping (norm ≤ 1.0) for stable training
-    - Early stopping with configurable patience
-    - Saves best checkpoint by validation loss
-    - Persistence baseline computed and logged (model must beat it)
-    - Evaluation returns per-day R² for days 1–7
+Changes from v1:
+    - Passes crop tensor to model forward()
+    - Derives crop from season array (0=Rabi→Wheat, 1=Kharif→Rice, 2→Sugarcane)
+    - Evaluation reports RMSE, MAE, per-day R², decision accuracy
+    - patience increased to 15 (more epochs with larger model)
 """
 
 from __future__ import annotations
@@ -23,7 +21,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from sklearn.metrics import r2_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 from config.settings import settings
 from models.patchtst import dataset as ds_mod
@@ -33,6 +31,18 @@ from models.patchtst.dataset import ELISADataset
 _log = settings.get_logger(__name__)
 
 TARGET = "real_soil_moisture_mm"
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _season_to_crop(season: torch.Tensor) -> torch.Tensor:
+    """
+    Derives crop integer from season code for the model's crop embedding.
+        season 0 (Rabi)      → crop 0 (Wheat)
+        season 1 (Kharif)    → crop 1 (Rice)
+        season 2 (Sugarcane) → crop 2 (Sugarcane)
+    """
+    return season.clone()   # 1:1 mapping for our 3-class scheme
 
 
 # ── Checkpoint helpers ────────────────────────────────────────────────────────
@@ -54,14 +64,14 @@ def save_checkpoint(
         "epoch":        epoch,
         "val_loss":     val_loss,
         "settings": {
-            "seq_len":   settings.seq_len,
+            "seq_len":    settings.seq_len,
             "patch_size": settings.patch_size,
-            "d_model":   settings.d_model,
-            "n_heads":   settings.n_heads,
-            "n_layers":  settings.n_layers,
-            "d_ff":      settings.d_ff,
-            "dropout":   settings.dropout,
-            "horizon":   settings.forecast_horizon,
+            "d_model":    settings.d_model,
+            "n_heads":    settings.n_heads,
+            "n_layers":   settings.n_layers,
+            "d_ff":       settings.d_ff,
+            "dropout":    settings.dropout,
+            "horizon":    settings.forecast_horizon,
         },
     }, path)
 
@@ -76,10 +86,10 @@ def load_checkpoint(path: Optional[Path] = None) -> dict:
 # ── Training ───────────────────────────────────────────────────────────────────
 
 def train(
-    df:             pd.DataFrame,
-    feature_cols:   Optional[list] = None,
-    epochs:         Optional[int]  = None,
-    force:          bool           = False,
+    df:           pd.DataFrame,
+    feature_cols: Optional[list] = None,
+    epochs:       Optional[int]  = None,
+    force:        bool           = False,
 ) -> Path:
     """
     Full training pipeline.
@@ -87,16 +97,7 @@ def train(
     Chronological split:
         Train : year ≤ 2022
         Val   : year == 2023
-        Test  : year == 2024  (held out — never touched during training)
-
-    Args:
-        df           : Feature-engineered DataFrame.
-        feature_cols : Columns to use as features (auto-detected if None).
-        epochs       : Override EPOCHS from .env.
-        force        : Retrain even if checkpoint exists.
-
-    Returns:
-        Path to saved checkpoint.
+        Test  : year == 2024  (held out)
     """
     ckpt_path = settings.patchtst_checkpoint
     if ckpt_path.exists() and not force:
@@ -104,7 +105,11 @@ def train(
         return ckpt_path
 
     _log.info("=" * 62)
-    _log.info("Training PatchTST  |  horizon=%d days", settings.forecast_horizon)
+    _log.info("Training PatchTST v2  |  horizon=%d days", settings.forecast_horizon)
+    _log.info("  seq_len=%d  patch_size=%d  n_patches=%d",
+              settings.seq_len, settings.patch_size, settings.n_patches)
+    _log.info("  d_model=%d  n_layers=%d  d_ff=%d",
+              settings.d_model, settings.n_layers, settings.d_ff)
     _log.info("=" * 62)
 
     if feature_cols is None:
@@ -130,7 +135,7 @@ def train(
     _log.info("Device: %s", device)
     model.to(device)
 
-    # Persistence baseline (predict today's SM for every future day)
+    # Persistence baseline
     sm_idx = feature_cols.index(TARGET) if TARGET in feature_cols else 0
     persist_preds = np.tile(val_ds.X[:, -1, sm_idx].reshape(-1, 1), (1, settings.forecast_horizon))
     p_mse = float(np.mean((val_ds.y - persist_preds) ** 2))
@@ -144,26 +149,33 @@ def train(
     def tt(arr, dtype=torch.float32):
         return torch.tensor(arr, dtype=dtype).to(device)
 
-    Xt = tt(train_ds.X); yt  = tt(train_ds.y)
-    dt = tt(train_ds.doy, torch.long); st = tt(train_ds.season, torch.long)
-    Xv = tt(val_ds.X);   yv  = tt(val_ds.y)
-    dv = tt(val_ds.doy,  torch.long); sv = tt(val_ds.season, torch.long)
+    Xt  = tt(train_ds.X)
+    yt  = tt(train_ds.y)
+    dt  = tt(train_ds.doy,    torch.long)
+    st  = tt(train_ds.season, torch.long)
+    ct  = _season_to_crop(st)
+
+    Xv  = tt(val_ds.X)
+    yv  = tt(val_ds.y)
+    dv  = tt(val_ds.doy,    torch.long)
+    sv  = tt(val_ds.season, torch.long)
+    cv  = _season_to_crop(sv)
 
     best_val_loss  = float("inf")
-    patience_limit = 10
+    patience_limit = 15   # increased for larger model
     patience_ctr   = 0
     best_epoch     = 0
 
     for epoch in range(1, n_epochs + 1):
         t0 = time.time()
         model.train()
-        perm     = torch.randperm(len(Xt), device=device)
-        ep_loss  = 0.0
+        perm    = torch.randperm(len(Xt), device=device)
+        ep_loss = 0.0
 
         for i in range(0, len(Xt), settings.batch_size):
-            idx    = perm[i: i + settings.batch_size]
-            pred   = model(Xt[idx], dt[idx], st[idx])
-            loss   = criterion(pred, yt[idx])
+            idx  = perm[i: i + settings.batch_size]
+            pred = model(Xt[idx], dt[idx], st[idx], ct[idx])
+            loss = criterion(pred, yt[idx])
             optimiser.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -173,7 +185,7 @@ def train(
         scheduler.step()
         model.eval()
         with torch.no_grad():
-            val_loss = criterion(model(Xv, dv, sv), yv).item()
+            val_loss = criterion(model(Xv, dv, sv, cv), yv).item()
 
         if epoch % 10 == 0 or epoch == 1:
             _log.info(
@@ -209,17 +221,12 @@ def train(
 # ── Evaluation ─────────────────────────────────────────────────────────────────
 
 def evaluate(
-    df:  pd.DataFrame,
+    df:        pd.DataFrame,
     ckpt_path: Optional[Path] = None,
 ) -> Optional[dict]:
     """
-    Evaluates on 2024 test data (year held out from training).
-
-    Reports:
-        - Per-day R² for days 1–7
-        - Per-day R² of persistence baseline
-        - Decision accuracy (Day-1)
-        - Overall RMSE + MAE
+    Evaluates on 2024 holdout. Reports per-day R², RMSE, MAE,
+    decision accuracy, and comparison to persistence baseline.
     """
     try:
         ckpt = load_checkpoint(ckpt_path)
@@ -244,19 +251,31 @@ def evaluate(
     if test_ds is None:
         return None
 
+    crop_t = _season_to_crop(torch.tensor(test_ds.season, dtype=torch.long))
+
     with torch.no_grad():
         preds = model(
             torch.tensor(test_ds.X),
             torch.tensor(test_ds.doy,    dtype=torch.long),
             torch.tensor(test_ds.season, dtype=torch.long),
+            crop_t,
         ).numpy()
 
     sm_idx  = feature_cols.index(TARGET) if TARGET in feature_cols else 0
     persist = np.tile(test_ds.X[:, -1, sm_idx].reshape(-1, 1), (1, settings.forecast_horizon))
 
-    sep = "-" * 60
+    # Inverse-scale for absolute metrics (use first district's scaler as proxy)
+    first_district = test_df["district"].iloc[0]
+    tgt_scaler     = test_ds.scalers.get(f"{first_district}_target")
+
+    def inv(arr):
+        if tgt_scaler is not None:
+            return tgt_scaler.inverse_transform(arr.reshape(-1, 1)).ravel()
+        return arr
+
+    sep = "-" * 65
     _log.info(sep)
-    _log.info("  Per-day R² — PatchTST vs Persistence (2024 holdout)")
+    _log.info("  PatchTST v2 — Evaluation on 2024 holdout")
     _log.info("  %-8s  %-14s  %-14s  %s", "Day", "PatchTST R²", "Persist R²", "Result")
     _log.info(sep)
 
@@ -270,7 +289,17 @@ def evaluate(
                   d + 1, r2m, r2p, "BEATS" if r2m > r2p else "BELOW")
 
     _log.info(sep)
-    _log.info("  Expected: Day-1 R² > 0.85 | Day-7 R² ~ 0.60–0.70")
+
+    # Overall RMSE and MAE in mm (inverse-scaled)
+    all_true  = inv(test_ds.y.ravel())
+    all_pred  = inv(preds.ravel())
+    rmse      = float(np.sqrt(mean_squared_error(all_true, all_pred)))
+    mae       = float(mean_absolute_error(all_true, all_pred))
+
+    _log.info("  Overall RMSE : %.2f mm", rmse)
+    _log.info("  Overall MAE  : %.2f mm", mae)
+    _log.info("  Day-1 R²     : %.4f  (target > 0.85)", r2_model_per_day[0])
+    _log.info("  Day-7 R²     : %.4f  (target > 0.60)", r2_model_per_day[-1])
     _log.info(sep)
 
     return {
@@ -278,4 +307,6 @@ def evaluate(
         "per_day_persist_r2": r2_persist_per_day,
         "day1_r2":            r2_model_per_day[0],
         "day7_r2":            r2_model_per_day[-1],
+        "rmse_mm":            rmse,
+        "mae_mm":             mae,
     }

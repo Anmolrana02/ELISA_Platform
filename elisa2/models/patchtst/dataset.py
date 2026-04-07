@@ -4,14 +4,11 @@ models/patchtst/dataset.py
 ───────────────────────────
 PyTorch Dataset for multi-step PatchTST forecasting.
 
-Creates overlapping (X, y) windows from the time-series data.
-Each sample:
-    X[i]  : features for days [i, i+seq_len)         shape: (seq_len, n_features)
-    y[i]  : soil moisture for days [i+seq_len, i+seq_len+horizon) shape: (horizon,)
-    doy   : day-of-year at position i+seq_len          scalar (int)
-    season: 0=Rabi, 1=Kharif at position i+seq_len    scalar (int)
-
-Processes per-district to avoid sequence bleeding across district boundaries.
+Changes from v1:
+    - seq_len=60, patch_size=6 → 10 patches of 6 days (weekly cycle)
+    - crop_int added as a feature (0=Wheat, 1=Rice, 2=Sugarcane)
+    - month_sin / month_cos added as cyclic seasonality features
+    - season flag now 3-class: 0=Rabi, 1=Kharif, 2=Sugarcane year-round
 """
 
 from __future__ import annotations
@@ -30,10 +27,7 @@ TARGET = "real_soil_moisture_mm"
 class ELISADataset:
     """
     Holds all processed sequences for training/evaluation.
-
-    Not a torch.utils.data.Dataset subclass intentionally — we build
-    numpy arrays and convert to tensors in the trainer to keep this
-    module torch-free (easier to test independently).
+    Not a torch.Dataset subclass — numpy arrays converted in trainer.
     """
 
     def __init__(
@@ -57,7 +51,6 @@ class ELISADataset:
         return len(self.X)
 
     def inverse_transform_target(self, district: str, scaled: np.ndarray) -> np.ndarray:
-        """Converts scaled SM predictions back to mm for a given district."""
         scaler = self.scalers.get(f"{district}_target")
         if scaler is None:
             return scaled
@@ -71,16 +64,10 @@ def build(
     feature_cols: Optional[List[str]] = None,
 ) -> Optional[ELISADataset]:
     """
-    Builds sequences from the full dataset.
+    Builds overlapping (X, y) windows from the full dataset.
 
-    Args:
-        df           : Full training DataFrame (all districts).
-        seq_len      : Input window length in days.
-        horizon      : Forecast horizon in days.
-        feature_cols : Feature columns to use. Defaults to a standard set.
-
-    Returns:
-        ELISADataset or None on failure.
+    Per-district processing prevents sequence bleeding across boundaries.
+    Features include crop_int and month_sin/cos for improved seasonality.
     """
     if feature_cols is None:
         feature_cols = _default_features(df)
@@ -102,13 +89,19 @@ def build(
         feat_scaled = feat_scaler.fit_transform(d_df[avail])
         scalers[district] = feat_scaler
 
-        # Scale target separately (for easy inverse transform at inference)
-        tgt_scaler  = MinMaxScaler()
-        tgt_scaled  = tgt_scaler.fit_transform(d_df[[TARGET]]).ravel()
+        # Scale target separately (for inverse transform at inference)
+        tgt_scaler = MinMaxScaler()
+        tgt_scaled = tgt_scaler.fit_transform(d_df[[TARGET]]).ravel()
         scalers[f"{district}_target"] = tgt_scaler
 
-        doy_arr    = d_df["date"].dt.dayofyear.values
-        season_arr = ((d_df["date"].dt.month >= 6) & (d_df["date"].dt.month <= 10)).astype(int).values
+        doy_arr = d_df["date"].dt.dayofyear.values
+
+        # 3-class season: 0=Rabi (Nov-Apr), 1=Kharif (Jun-Oct), 2=Sugarcane (May or year-round)
+        month       = d_df["date"].dt.month
+        season_arr  = np.where(
+            d_df["crop"] == "Sugarcane", 2,
+            np.where((month >= 6) & (month <= 10), 1, 0)
+        ).astype(int)
 
         n = len(feat_scaled)
         for i in range(n - seq_len - horizon + 1):
@@ -131,29 +124,17 @@ def build(
     )
 
 
-def split_chronological(
-    dataset: ELISADataset,
-    test_ratio: float = 0.2,
-) -> Tuple[ELISADataset, ELISADataset]:
-    """
-    Splits dataset chronologically (no shuffle).
-    Earlier sequences → train. Later sequences → test.
-    """
-    n_train = int(len(dataset) * (1 - test_ratio))
-    train   = ELISADataset(
-        X=dataset.X[:n_train], y=dataset.y[:n_train],
-        doy=dataset.doy[:n_train], season=dataset.season[:n_train],
-        feature_cols=dataset.feature_cols, scalers=dataset.scalers,
-    )
-    test    = ELISADataset(
-        X=dataset.X[n_train:], y=dataset.y[n_train:],
-        doy=dataset.doy[n_train:], season=dataset.season[n_train:],
-        feature_cols=dataset.feature_cols, scalers=dataset.scalers,
-    )
-    return train, test
-
-
 def _default_features(df: pd.DataFrame) -> List[str]:
-    base     = [TARGET, "temperature_C", "precip_mm", "solar_rad_MJ_m2", "ETo_mm"]
-    optional = ["NDVI", "NDWI", "delta_VV", "VV"]
+    """
+    Default feature set for PatchTST.
+    Includes:
+      - Target SM (for autoregressive context)
+      - Weather: temperature, precip, solar, ETo
+      - Cyclic month encoding (sin/cos)
+      - Integer crop label (0=Wheat, 1=Rice, 2=Sugarcane)
+      - GEE satellite features if available
+    """
+    base = [TARGET, "temperature_C", "precip_mm", "solar_rad_MJ_m2", "ETo_mm",
+            "month_sin", "month_cos", "crop_int"]
+    optional = ["NDVI", "NDWI", "EVI", "delta_VV", "VV", "VH"]
     return base + [c for c in optional if c in df.columns]

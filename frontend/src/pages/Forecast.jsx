@@ -6,7 +6,7 @@ import { useFarm } from '../App'
 import SMChart from '../components/SMChart'
 
 const CROP_PARAMS = {
-  Wheat: { triggerMM: 170, fcMM: 225, pwpMM: 135 },
+  Wheat: { triggerMM: 180, fcMM: 225, pwpMM: 135 },
   Rice:  { triggerMM: 20,  fcMM: 50,  pwpMM: 0 },
 }
 

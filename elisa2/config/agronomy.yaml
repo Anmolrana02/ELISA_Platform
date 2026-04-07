@@ -7,11 +7,11 @@
 
 study_area:
   districts:
-    Baghpat:      { lat: 28.94, lon: 77.22 }
-    Shamli:       { lat: 29.45, lon: 77.31 }
-    Meerut:       { lat: 28.98, lon: 77.70 }
+    Baghpat:       { lat: 28.94, lon: 77.22 }
+    Shamli:        { lat: 29.45, lon: 77.31 }
+    Meerut:        { lat: 28.98, lon: 77.70 }
     Muzaffarnagar: { lat: 29.47, lon: 77.68 }
-    Ghaziabad:    { lat: 28.66, lon: 77.42 }
+    Ghaziabad:     { lat: 28.66, lon: 77.42 }
 
 soil:
   field_capacity_frac: 0.25      # volumetric fraction at FC
@@ -40,6 +40,23 @@ crops:
       mid:      { doy_start: 200, doy_end: 280, value: 1.20 }
       late:     { doy_start: 280, doy_end: 304, value: 0.90 }
       default:  0.60
+
+  Sugarcane:
+    # FAO-56 parameters for Western UP ratoon sugarcane
+    # Root depth: 1200mm (deep-rooted perennial ratoon)
+    # fc_mm  = 0.25 × 1200 = 300 mm
+    # pwp_mm = 0.15 × 1200 = 180 mm
+    # trigger= FC - MAD×(FC-PWP) = 300 - 0.65×120 = 222 mm
+    root_depth_mm:    1200.0
+    mad:              0.65        # Sugarcane tolerates more depletion than wheat
+    irr_amount_mm:    80.0        # Larger dose for deep-rooted crop
+    growing_months:   [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]  # Year-round ratoon
+    kc:
+      # FAO-56 Table 12 for sugarcane, Western UP tropical conditions
+      initial:  { doy_start: 1,   doy_end: 90,  value: 0.40 }   # Jan–Mar: slow growth
+      mid:      { doy_start: 91,  doy_end: 273, value: 1.25 }   # Apr–Sep: grand growth
+      late:     { doy_start: 274, doy_end: 365, value: 0.75 }   # Oct–Dec: maturation
+      default:  1.00
 
 pump:
   power_hp:     5

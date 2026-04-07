@@ -4,18 +4,19 @@ features/soil_balance.py
 ─────────────────────────
 Daily FAO-56 soil water balance simulation.
 
-Generates synthetic but physically-correct soil moisture training labels
-for districts where real ERA5 data is unavailable.
-
-Two crop logics:
-    Wheat (MAD — Management Allowed Depletion):
-        Irrigate when SM drops below trigger = FC - MAD × (FC - PWP).
+Three crop logics:
+    Wheat (MAD):
+        Irrigate when SM drops below trigger = FC - MAD×(FC-PWP).
         SM bounded between [PWP, FC].
 
     Rice (Ponding):
-        Maintain a standing water layer. Irrigate when ponding level drops
-        below trigger, refilling to the target depth. Accounts for
-        daily percolation losses.
+        Maintain standing water layer. Irrigate when ponding drops
+        below trigger, refilling to target depth. Cap at ponding_target_mm.
+
+    Sugarcane (MAD — same logic as Wheat, different params):
+        Deep-rooted (1200mm), higher MAD (0.65), year-round crop.
+        trigger = FC - MAD×(FC-PWP) = 300 - 0.65×120 = 222 mm.
+        SM bounded between [PWP=180mm, FC=300mm].
 """
 
 from __future__ import annotations
@@ -39,12 +40,15 @@ def simulate_district(district_df: pd.DataFrame, district_name: str) -> pd.DataF
         district_df with new columns: real_soil_moisture_mm, generated_irrigated
     """
     district_df = parse_dates(district_df)
-    profiles = agro.crops
-    wheat    = profiles["Wheat"]
-    rice     = profiles["Rice"]
+    profiles    = agro.crops
+    wheat       = profiles["Wheat"]
+    rice        = profiles["Rice"]
+    sugarcane   = profiles["Sugarcane"]
 
-    wheat_state = {"sm": wheat.fc_mm}
-    rice_state  = {"ponding": rice.ponding_target_mm}
+    wheat_state     = {"sm": wheat.fc_mm}
+    rice_state      = {"ponding": rice.ponding_target_mm}
+    sugarcane_state = {"sm": sugarcane.fc_mm}
+
     moisture, irrigated = [], []
 
     for _, row in district_df.iterrows():
@@ -70,12 +74,24 @@ def simulate_district(district_df: pd.DataFrame, district_name: str) -> pd.DataF
             if ponding < rice.trigger_mm and row["date"].month in rice.growing_months:
                 irr     = rice.irr_amount_mm
                 ponding = rice.ponding_target_mm
-            ponding = max(0.0, ponding)
+            # Cap at ponding_target_mm — fix for the 277mm bug
+            ponding = max(0.0, min(ponding, rice.ponding_target_mm))
             rice_state["ponding"] = ponding
             moisture.append(ponding)
 
+        elif crop == "Sugarcane":
+            # MAD-based, same logic as Wheat, year-round
+            sm = sugarcane_state["sm"] + row["precip_mm"]
+            # Sugarcane grows year-round — irrigate whenever SM drops below trigger
+            if sm < sugarcane.trigger_mm:
+                irr = sugarcane.irr_amount_mm
+                sm += irr
+            sm = float(np.clip(sm - row["ETo_mm"], sugarcane.pwp_mm, sugarcane.fc_mm))
+            sugarcane_state["sm"] = sm
+            moisture.append(sm)
+
         else:
-            # Transition month — carry wheat state forward
+            # Transition / None — carry Wheat state forward as neutral fallback
             moisture.append(wheat_state["sm"])
 
         irrigated.append(irr)
